@@ -1,0 +1,149 @@
+---
+title: "Google Data Analytics Capstone"
+author: "Antonio Iannopollo"
+date: "2025-06-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(readr)
+library(ggplot2)
+```
+
+## Business Task
+Analyze FitBit Fitness Tracker Data to identify trends in smart device usage (activity, sleep, heart rate) and provide high-level recommendations for Bellabeat’s marketing strategy for the Leaf tracker, focusing on growth in the global smart device market.
+
+## Data Sources
+Source: FitBit Fitness Tracker Data (CC0, Kaggle, via Mobius), from 30 users, including daily activity, minute-level sleep, and second-level heart rate data.
+
+Files Used:
+
+- dailyActivity_merged_m1.csv, m2.csv: Steps, distance, calories.
+
+- minuteSleep_merged_m1.csv, m2.csv: Sleep states (asleep, restless, awake).
+
+- heartrate_seconds_merged_m1.csv, m2.csv: Heart rate.
+
+Note: Original file names were modified by adding '_m1' or '_m2' to distinguish between files with identical names in the dataset.
+
+Limitations: Small sample (30 users), no demographic data, outdated (2016), missing sleep (751 records) and heart rate (919 records) data.
+
+## Data Cleaning and Processing
+Activity: Merged dailyActivity_merged_m1.csv and m2.csv, standardized dates (mdy), no duplicates or missing values.
+
+Sleep: Merged minuteSleep_merged_m1.csv and m2.csv, aggregated to daily totals (minutes asleep, restless, awake, time in bed, sleep records), no duplicates.
+
+Heart Rate: Merged heartrate_seconds_merged_m1.csv and m2.csv, aggregated to daily averages, no duplicates.
+
+Merged Data: Combined datasets by Id and Date using left_join.
+
+```{r load-data, echo=TRUE, results='hide', message=FALSE, warning=FALSE}
+# Load and process data
+daily_activity <- bind_rows(read_csv("dailyActivity_merged_m1.csv"), read_csv("dailyActivity_merged_m2.csv")) %>%
+  mutate(ActivityDate = mdy(ActivityDate)) %>% rename(Date = ActivityDate)
+sleep_combined <- bind_rows(read_csv("minuteSleep_merged_m1.csv"), read_csv("minuteSleep_merged_m2.csv")) %>%
+  mutate(date = mdy_hms(date)) %>% mutate(Date = as.Date(date))
+sleep_daily <- sleep_combined %>%
+  group_by(Id, Date) %>%
+  summarize(TotalMinutesAsleep = sum(value == 1, na.rm = TRUE),
+            TotalMinutesRestless = sum(value == 2, na.rm = TRUE),
+            TotalMinutesAwake = sum(value == 3, na.rm = TRUE),
+            TotalTimeInBed = sum(value %in% c(1, 2, 3), na.rm = TRUE),
+            SleepRecords = n_distinct(logId)) %>%
+  ungroup()
+heartrate_combined <- bind_rows(read_csv("heartrate_seconds_merged_m1.csv"), read_csv("heartrate_seconds_merged_m2.csv")) %>%
+  mutate(Time = mdy_hms(Time)) %>% mutate(Date = as.Date(Time))
+heartrate_daily <- heartrate_combined %>%
+  group_by(Id, Date) %>%
+  summarize(AvgHeartRate = mean(Value, na.rm = TRUE)) %>%
+  ungroup()
+combined_data <- daily_activity %>%
+  left_join(heartrate_daily, by = c("Id", "Date")) %>%
+  left_join(sleep_daily, by = c("Id", "Date"))
+```
+## Analysis Summary
+Activity: Strong positive correlation between steps and calories (r = 0.59, p < 2.2e-16, 1397 records), indicating fitness tracking is a primary use.
+
+Sleep: Weak negative correlation between sleep and steps (r = -0.17, p = 1.591e-05, 646 records), suggesting sleep tracking is used for rest/recovery.
+
+Heart Rate: Weak positive correlation between heart rate and steps (r = 0.23, p = 3.812e-07, 478 records), indicating niche use.
+
+Usage Patterns: All users track activity (100% of records), but only 46% track sleep and 34% track heart rate, reflecting inconsistent usage.
+
+```{r summary-stats, echo=TRUE, results='hide', message=FALSE, warning=FALSE}
+## Summary statistics
+activity_summary <- daily_activity %>%
+  summarize(AvgSteps = mean(TotalSteps, na.rm = TRUE), AvgCalories = mean(Calories, na.rm = TRUE))
+sleep_summary <- sleep_daily %>%
+  summarize(AvgSleepMinutes = mean(TotalMinutesAsleep, na.rm = TRUE), AvgTimeInBed = mean(TotalTimeInBed, na.rm = TRUE))
+heartrate_summary <- heartrate_daily %>%
+  summarize(AvgHeartRate = mean(AvgHeartRate, na.rm = TRUE))
+usage_summary <- combined_data %>%
+  summarize(Users_Activity = n_distinct(Id[!is.na(TotalSteps)]), Users_Sleep = n_distinct(Id[!is.na(TotalMinutesAsleep)]),
+            Users_HeartRate = n_distinct(Id[!is.na(AvgHeartRate)]))
+print(activity_summary)
+print(sleep_summary)
+print(heartrate_summary)
+print(usage_summary)
+```
+
+## Visualizations
+
+```{r plot-steps-calories, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(combined_data, aes(x = TotalSteps, y = Calories)) +
+  geom_point(color = "blue", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Strong Correlation: Steps vs. Calories Burned", x = "Total Steps", y = "Calories",
+       caption = "r = 0.59, p < 2.2e-16 (1397 records)") +
+  theme_minimal()
+```
+
+```{r plot-sleep-steps, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(combined_data, aes(x = TotalMinutesAsleep, y = TotalSteps)) +
+  geom_point(color = "green", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Weak Negative Correlation: Sleep vs. Steps", x = "Minutes Asleep", y = "Total Steps",
+       caption = "r = -0.17, p = 1.591e-05 (646 records)") +
+  theme_minimal()
+```
+
+```{r plot-heartrate-steps, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(combined_data, aes(x = AvgHeartRate, y = TotalSteps)) +
+  geom_point(color = "purple", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Weak Positive Correlation: Heart Rate vs. Steps", x = "Average Heart Rate (bpm)", y = "Total Steps",
+       caption = "r = 0.23, p = 3.812e-07 (478 records)") +
+  theme_minimal()
+```
+
+```{r feature, echo=FALSE, message=FALSE, warning=FALSE}
+percent_data <- data.frame(
+  Feature = c("Activity", "Sleep", "Heart Rate"),
+  Percent = c(100, mean(!is.na(combined_data$TotalMinutesAsleep)) * 100, mean(!is.na(combined_data$AvgHeartRate)) * 100)
+)
+```
+```{r feature-usage, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(percent_data, aes(x = Feature, y = Percent, fill = Feature)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Percentage of Records with Data by Feature", x = "Feature", y = "Percentage of Records (%)",
+       caption = "Activity: 1397 records, Sleep: 646 records, Heart Rate: 478 records") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Activity" = "blue", "Sleep" = "green", "Heart Rate" = "purple"))
+```
+
+## Recommendations for Bellabeat
+Emphasize Activity Tracking: Market Leaf as a stylish fitness tracker: “Track steps and calories with Leaf’s elegant design.” Use Instagram/YouTube ads.
+
+Promote Sleep Tracking with Education: Highlight sleep insights and encourage nighttime wear: “Discover better rest with Leaf.”
+
+Target Heart Rate as Premium Feature: Position heart rate for fitness/stress monitoring: “Monitor your heart rate with Leaf.”
+
+Address Usage Barriers: Promote Leaf’s versatility (bracelet, necklace, clip) and app prompts to increase sleep/heart rate tracking.
+
+Leverage Digital Marketing: Run video ads on Google, Instagram, YouTube for key dates (e.g., New Year’s).
+
+Collect Proprietary Data: Gather female-specific data to validate trends for Bellabeat’s audience.
